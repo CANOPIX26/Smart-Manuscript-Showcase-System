@@ -1,28 +1,28 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 
-// WiFi Credentials - YOUR HOME/OFFICE NETWORK
-const char* ssid = "Sara's Galaxy A34 5G";        // Change to your WiFi name
-const char* password = "sara292005"; // Change to your WiFi password
+// WiFi Credentials - Network Configuration
+const char* ssid = "Sara's Galaxy A34 5G";      // Target WiFi SSID
+const char* password = "sara292005";            // WiFi Password
 
-// Pin Definitions
-const int trigPin = D0;
-const int echoPin = D1;
-const int ldrPin = A0;
+// Pin Definitions for Sensors
+const int trigPin = D0;                         // Ultrasonic Trigger
+const int echoPin = D1;                         // Ultrasonic Echo
+const int ldrPin = A0;                          // Light Dependent Resistor (Analog)
 
-// L298N Pins
-const int enA = D2, in1 = D3, in2 = D4;
-const int enB = D7, in3 = D5, in4 = D6;
+// L298N Motor/LED Driver Pins
+const int enA = D2, in1 = D3, in2 = D4;         // Channel A Control
+const int enB = D7, in3 = D5, in4 = D6;         // Channel B Control
 
-// Thresholds
-const int DARK = 800;
-const int BRIGHT = 200;
-const int PERSON_DIST = 50;
+// Operational Thresholds
+const int DARK = 800;                           // High resistance = Dark environment
+const int BRIGHT = 200;                         // Low resistance = Bright environment
+const int PERSON_DIST = 50;                     // Detection range in cm (50cm)
 
-// Web server on port 80
+// Web server instance on standard HTTP port 80
 ESP8266WebServer server(80);
 
-// Variables to store sensor readings
+// Global variables for sensor telemetry
 int ldrValue = 0;
 int distance = 0;
 bool personDetected = false;
@@ -31,23 +31,24 @@ int ledBrightness = 0;
 void setup() {
   Serial.begin(115200);
   
+  // Initialize Sensor Pins
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
   
-  // Setup L298N pins
+  // Initialize L298N Output Pins using a loop for efficiency
   int pins[] = {enA, in1, in2, enB, in3, in4};
   for (int i = 0; i < 6; i++) pinMode(pins[i], OUTPUT);
   
-  // Set forward direction
+  // Set default forward direction for the driver channels
   digitalWrite(in1, HIGH); digitalWrite(in2, LOW);
   digitalWrite(in3, HIGH); digitalWrite(in4, LOW);
   
-  // Connect to your WiFi network
+  // Begin WiFi Connection Sequence
   WiFi.begin(ssid, password);
   Serial.print("Connecting to WiFi: ");
   Serial.println(ssid);
   
-  // Wait for connection
+  // Connection timeout logic (approx 30 seconds)
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 30) {
     delay(1000);
@@ -65,50 +66,54 @@ void setup() {
     Serial.println("Check your credentials or try again.");
   }
   
-  // Setup web server
-  server.on("/", handleRoot);
-  server.on("/data", handleData);
+  // Define Web Server Routing
+  server.on("/", handleRoot);      // Serves the main Dashboard UI
+  server.on("/data", handleData);  // Serves real-time JSON data for the UI
   server.begin();
   Serial.println("Web server started");
 }
 
 void loop() {
-  // Read sensors
+  // 1. Data Acquisition
   ldrValue = analogRead(ldrPin);
   distance = getDistance();
   personDetected = (distance > 0 && distance < PERSON_DIST);
   
-  // Control LEDs
+  // 2. Control Logic: Adjust LED brightness based on proximity and ambient light
   if (personDetected) {
+    // Map LDR values to PWM range (0-255). Constrain ensures we stay in bounds.
     ledBrightness = constrain(map(ldrValue, BRIGHT, DARK, 0, 255), 0, 255);
     analogWrite(enA, ledBrightness);
     analogWrite(enB, ledBrightness);
   } else {
+    // Turn off LEDs if no one is detected
     ledBrightness = 0;
     analogWrite(enA, 0);
     analogWrite(enB, 0);
   }
   
-  // Print to Serial
+  // 3. Serial Debugging Output
   Serial.print("LDR:" + String(ldrValue) + " Dist:" + String(distance) + "cm Person:" + String(personDetected ? "YES" : "NO"));
   Serial.println(" LEDs:" + String(ledBrightness));
   
-  // Handle web server requests
+  // 4. Handle incoming HTTP client requests
   server.handleClient();
   
-  delay(300);
+  delay(300); // Small delay to prevent sensor spamming
 }
 
+// Function to calculate distance using the HC-SR04 Ultrasonic sensor
 int getDistance() {
   digitalWrite(trigPin, LOW); delayMicroseconds(2);
   digitalWrite(trigPin, HIGH); delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
   
+  // Pulse timeout set to 30ms (approx 5 meters max)
   long duration = pulseIn(echoPin, HIGH, 30000);
   return (duration > 0) ? duration * 0.034 / 2 : -1;
 }
 
-// Main webpage with real-time updates
+// Main HTML Dashboard Interface
 void handleRoot() {
   String html = "<!DOCTYPE html><html>";
   html += "<head><meta name='viewport' content='width=device-width, initial-scale=1'>";
@@ -123,6 +128,8 @@ void handleRoot() {
   html += ".led{background:#fce4ec;}";
   html += ".value{font-size:24px;font-weight:bold;color:#1976d2;}";
   html += "</style>";
+  
+  // AJAX Script for real-time dashboard updates without refreshing page
   html += "<script>";
   html += "function updateData(){";
   html += "fetch('/data').then(r=>r.json()).then(d=>{";
@@ -137,26 +144,26 @@ void handleRoot() {
   html += "if(v > " + String(DARK) + ") return 'Dark';";
   html += "if(v < " + String(BRIGHT) + ") return 'Bright';";
   html += "return 'Medium';}";
-  html += "setInterval(updateData, 100);"; // Update every 100ms (instant feel)
+  html += "setInterval(updateData, 100);"; // Fetch updates every 100ms
   html += "</script>";
+  
   html += "</head><body>";
   html += "<div class='container'>";
-  html += "<h1>ESP8266 LED Controller</h1>";
-  html += "<p><small>Connected to: " + String(ssid) + "</small></p>";
-  html += "<p><small>Real-time updates (100ms)</small></p>";
+  html += "<h1>ESP8266 Manuscript Telemetry</h1>";
+  html += "<p><small>SSID: " + String(ssid) + "</small></p>";
   
-  // Sensor readings with IDs for JavaScript
+  // UI Panels for individual sensors
   html += "<div class='sensor ldr'><h2>Light Level</h2>";
   html += "<div class='value' id='ldr'>" + String(ldrValue) + "</div>";
   html += "<div id='lightCond'>" + getLightCondition(ldrValue) + "</div></div>";
   
-  html += "<div class='sensor dist'><h2>Distance</h2>";
+  html += "<div class='sensor dist'><h2>Visitor Proximity</h2>";
   html += "<div class='value' id='dist'>" + String(distance) + " cm</div></div>";
   
-  html += "<div class='sensor person'><h2>Person Detected</h2>";
+  html += "<div class='sensor person'><h2>Presence Detected</h2>";
   html += "<div class='value' id='person'>" + String(personDetected ? "YES" : "NO") + "</div></div>";
   
-  html += "<div class='sensor led'><h2>LED Brightness</h2>";
+  html += "<div class='sensor led'><h2>LED Output Status</h2>";
   html += "<div class='value' id='led'>" + String(ledBrightness) + " / 255</div>";
   html += "<div id='percent'>" + String(map(ledBrightness, 0, 255, 0, 100)) + "%</div></div>";
   
@@ -165,7 +172,7 @@ void handleRoot() {
   server.send(200, "text/html", html);
 }
 
-// JSON data endpoint
+// JSON Endpoint for data fetching (API-style)
 void handleData() {
   String json = "{";
   json += "\"ldr\":" + String(ldrValue) + ",";
@@ -177,6 +184,7 @@ void handleData() {
   server.send(200, "application/json", json);
 }
 
+// Helper function to categorize light levels
 String getLightCondition(int value) {
   if (value > DARK) return "Dark";
   if (value < BRIGHT) return "Bright";
